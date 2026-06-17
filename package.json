@@ -1,0 +1,12 @@
+{
+  "name": "travel-proxy",
+  "version": "1.0.0",
+  "description": "Proxy sicuro per Anthropic API",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "devDependencies": {
+    "vercel": "^37.0.0"
+  }
+}
