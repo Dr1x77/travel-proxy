@@ -1,31 +1,41 @@
 // ============================================================
-//  travel-proxy/api/chat.js
-//  Proxy sicuro per Anthropic API — deploy su Vercel
+//  travel-proxy/api/chat.js  — con rate limit
 // ============================================================
-//
-//  Variabili d'ambiente da impostare su Vercel Dashboard:
-//    ANTHROPIC_API_KEY   → sk-ant-...
-//    APP_SECRET_TOKEN    → una stringa casuale lunga (vedi sotto)
-//
-//  Come generare APP_SECRET_TOKEN (esegui nel terminale):
-//    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-// ============================================================
+
+// Mappa in memoria: ip → { count, resetTime }
+const rateLimit = new Map();
 
 export default async function handler(req, res) {
 
-  // ── 1. Solo POST ────────────────────────────────────────────
+  // ── 1. Solo POST ──────────────────────────────────────────
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // ── 2. Verifica token segreto ───────────────────────────────
+  // ── 2. Rate limit: max 20 richieste/ora per IP ────────────
+  const ip = req.headers['x-forwarded-for']?.split(',')[0] || 'unknown';
+  const now = Date.now();
+  const entry = rateLimit.get(ip) || { count: 0, resetTime: now + 3600000 };
+
+  if (now > entry.resetTime) {
+    entry.count = 0;
+    entry.resetTime = now + 3600000;
+  }
+  entry.count++;
+  rateLimit.set(ip, entry);
+
+  if (entry.count > 20) {
+    return res.status(429).json({ error: 'Troppe richieste, riprova più tardi' });
+  }
+
+  // ── 3. Verifica token segreto ─────────────────────────────
   const authHeader = req.headers['x-app-token'];
   if (!authHeader || authHeader !== process.env.APP_SECRET_TOKEN) {
     console.warn('[proxy] Richiesta rifiutata: token mancante o errato');
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // ── 3. Valida il body ───────────────────────────────────────
+  // ── 4. Valida il body ─────────────────────────────────────
   const { model, max_tokens, messages, system } = req.body || {};
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -36,7 +46,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'max_tokens non può superare 4096' });
   }
 
-  // ── 4. Chiamata ad Anthropic ────────────────────────────────
+  // ── 5. Chiamata ad Anthropic ──────────────────────────────
   let anthropicResponse;
   try {
     anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
@@ -58,7 +68,7 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Impossibile raggiungere Anthropic' });
   }
 
-  // ── 5. Gestione errori Anthropic ────────────────────────────
+  // ── 6. Gestione errori Anthropic ──────────────────────────
   if (!anthropicResponse.ok) {
     const errBody = await anthropicResponse.json().catch(() => ({}));
     console.error('[proxy] Errore Anthropic:', anthropicResponse.status, errBody);
@@ -70,7 +80,7 @@ export default async function handler(req, res) {
     return res.status(anthropicResponse.status).json({ error: clientMessage });
   }
 
-  // ── 6. Risposta ok → passa al client ───────────────────────
+  // ── 7. Risposta ok ────────────────────────────────────────
   const data = await anthropicResponse.json();
 
   res.setHeader('Access-Control-Allow-Origin', '*');
