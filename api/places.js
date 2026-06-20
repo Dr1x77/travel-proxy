@@ -1,7 +1,8 @@
 // api/places.js
 // Endpoint proxy per Google Places API (Text Search)
-// Riceve: { query: string, lat?: number, lng?: number, token: string }
+// Riceve: { query: string, lat?: number, lng?: number, language?: 'it'|'en', token: string }
 // Restituisce: { results: [{ name, address, lat, lng }] }
+// language: localizza nome/indirizzo dei risultati (default 'it' se assente/non riconosciuta)
 
 export default async function handler(req, res) {
   // CORS
@@ -18,7 +19,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { query, lat, lng, token } = req.body || {};
+    const { query, lat, lng, language, token } = req.body || {};
 
     // Stesso token di autenticazione già usato per /api/chat
     if (!token || token !== process.env.APP_SECRET_TOKEN) {
@@ -39,6 +40,11 @@ export default async function handler(req, res) {
       query: query.trim(),
       key: apiKey,
     });
+
+    // Localizza nome/indirizzo dei risultati nella lingua dell'app (default 'it' se non specificata
+    // o non riconosciuta — evita risultati anglicizzati tipo "Turin" invece di "Torino")
+    const safeLanguage = (language === 'it' || language === 'en') ? language : 'it';
+    params.set('language', safeLanguage);
 
     // Se abbiamo coordinate di contesto (es. tappa), usiamo location+radius
     // per dare priorità ai risultati vicini, senza escludere il resto.
