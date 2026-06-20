@@ -1,8 +1,10 @@
 // api/places.js
 // Endpoint proxy per Google Places API (Text Search)
-// Riceve: { query: string, lat?: number, lng?: number, language?: 'it'|'en', token: string }
+// Riceve: { query: string, lat?: number, lng?: number, radius?: number, language?: 'it'|'en', token: string }
 // Restituisce: { results: [{ name, address, lat, lng }] }
 // language: localizza nome/indirizzo dei risultati (default 'it' se assente/non riconosciuta)
+// radius: in metri, default 50000 (50km) se non specificato — usare un valore più stretto
+//         (es. 8000-10000) per ricerche "vicino a me" dove serve davvero prossimità reale
 
 export default async function handler(req, res) {
   // CORS
@@ -19,7 +21,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { query, lat, lng, language, token } = req.body || {};
+    const { query, lat, lng, radius, language, token } = req.body || {};
 
     // Stesso token di autenticazione già usato per /api/chat
     if (!token || token !== process.env.APP_SECRET_TOKEN) {
@@ -46,11 +48,14 @@ export default async function handler(req, res) {
     const safeLanguage = (language === 'it' || language === 'en') ? language : 'it';
     params.set('language', safeLanguage);
 
-    // Se abbiamo coordinate di contesto (es. tappa), usiamo location+radius
+    // Se abbiamo coordinate di contesto (es. tappa, o "dove sei adesso"), usiamo location+radius
     // per dare priorità ai risultati vicini, senza escludere il resto.
     if (typeof lat === 'number' && typeof lng === 'number') {
       params.set('location', `${lat},${lng}`);
-      params.set('radius', '50000'); // 50 km, coerente con la logica già usata in app
+      // radius personalizzabile dal chiamante (es. 8000 per "vicino a me", più stretto del default
+      // 50km pensato per la ricerca puntuale con margine ampio). Validato: numero positivo, max 50km.
+      const safeRadius = (typeof radius === 'number' && radius > 0 && radius <= 50000) ? radius : 50000;
+      params.set('radius', String(safeRadius));
     }
 
     const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?${params.toString()}`;
